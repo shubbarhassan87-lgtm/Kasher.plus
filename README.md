@@ -1,2 +1,0 @@
-# Kasher.plus
-index.html
