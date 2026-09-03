@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>الأمين للحسابات المتقدم - الإصدار الشامل الأخير</title>
+    <title>الأمين للحسابات المتقدم - المزامنة السحابية Firebase</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://unpkg.com/@zxing/library@latest"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
-    
+
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
         body { background-color: #f2f5f9; display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; padding: 15px; }
@@ -18,6 +18,11 @@
         .header-title { display: flex; align-items: center; gap: 8px; font-size: 20px; font-weight: 700; color: #1a202c; }
         .header-title i { color: #2563eb; font-size: 22px; }
         .user-badge { font-size: 11px; background: #e2e8f0; padding: 4px 8px; border-radius: 12px; font-weight: bold; color: #334155; }
+
+        /* شريط حالة الاتصال السحابي */
+        .cloud-status-bar { padding: 6px 12px; border-radius: 8px; font-size: 11px; font-weight: bold; text-align: center; margin-bottom: 10px; display: flex; align-items: center; justify-content: center; gap: 6px; }
+        .cloud-online { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
+        .cloud-offline { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
 
         .alert-bar { background: #fee2e2; border: 1px solid #fca5a5; color: #991b1b; padding: 10px; border-radius: 12px; margin-bottom: 10px; font-size: 12px; font-weight: bold; display: none; align-items: center; gap: 8px; cursor: pointer; }
         .alert-bar-exp { background: #fef3c7; border: 1px solid #fcd34d; color: #92400e; padding: 10px; border-radius: 12px; margin-bottom: 15px; font-size: 12px; font-weight: bold; display: none; align-items: center; gap: 8px; cursor: pointer; }
@@ -147,6 +152,12 @@
                 </div>
                 <div class="user-badge" id="currentUserBadge">مالك</div>
             </header>
+
+            <!-- شريط حالة الاتصال السحابي -->
+            <div id="cloudStatus" class="cloud-status-bar cloud-offline">
+                <i class="fa-solid fa-cloud"></i>
+                <span id="cloudStatusText">جاري الاتصال بقاعدة بيانات Firebase...</span>
+            </div>
 
             <div class="usd-rate-bar">
                 <span>سعر صرف $100 اليوم:</span>
@@ -352,13 +363,27 @@
             </div>
         </div>
 
-        <!-- صفحة الإعدادات والنسخ الاحتياطي -->
+        <!-- صفحة الإعدادات والنسخ الاحتياطي والربط السحابي -->
         <div id="settingsPage" class="page">
             <div class="card-box">
                 <div class="card-header">
                     <button class="btn-back" onclick="showHome()"><i class="fa-solid fa-arrow-right"></i> رجوع</button>
-                    <h3 style="color: #334155;">الإعدادات والنسخ</h3>
+                    <h3 style="color: #334155;">الإعدادات والربط السحابي</h3>
                 </div>
+
+                <!-- إعدادات Firebase -->
+                <h4 style="margin-bottom: 10px; color: #d97706;"><i class="fa-solid fa-fire"></i> إعدادات Firebase Realtime Database</h4>
+                <div class="form-group">
+                    <label>Database URL (رابط قاعدة البيانات)</label>
+                    <input type="text" id="cfgFbDbUrl" placeholder="https://your-app-default-rtdb.firebaseio.com">
+                </div>
+                <div class="form-group">
+                    <label>API Key</label>
+                    <input type="text" id="cfgFbApiKey" placeholder="AIzaSy...">
+                </div>
+                <button class="btn btn-add" style="background:#d97706; margin-bottom:15px;" onclick="saveFirebaseSettings()">حفظ وإعادة الاتصال بالسحابة</button>
+
+                <hr style="margin: 15px 0;">
 
                 <h4 style="margin-bottom: 10px; color: #16a34a;">سعر الصرف والدولار</h4>
                 <div class="form-group">
@@ -682,7 +707,7 @@
             </div>
             <div id="receiptPrintArea" style="padding: 10px; border:1px solid #cbd5e1; border-radius:8px;">
                 <h3 style="text-align: center;" id="rcStoreName">اسم المحل</h3>
-                <h4 style="text-align: center; margin:5px 0;">سند قبض وتدديد دين</h4>
+                <h4 style="text-align: center; margin:5px 0;">سند قبض وتأديد دين</h4>
                 <hr style="margin:8px 0;">
                 <p><strong>استلمنا من السيد/ة:</strong> <span id="rcPerson"></span></p>
                 <p><strong>مبلغ وقدره:</strong> <span id="rcAmount" style="font-weight:bold; color:#16a34a;"></span> د.ع</p>
@@ -694,6 +719,127 @@
         </div>
     </div>
 
+    <!-- وحدة Firebase Web SDK v9 -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+
+        let firebaseApp = null;
+        let firebaseDb = null;
+        let isSyncingFromCloud = false;
+
+        // استرجاع بيانات ربط Firebase المخزنة
+        function getFirebaseConfig() {
+            return JSON.parse(localStorage.getItem('alAmeenFirebaseConfig') || JSON.stringify({
+                databaseURL: "",
+                apiKey: ""
+            }));
+        }
+
+        function initFirebase() {
+            const config = getFirebaseConfig();
+            const statusBox = document.getElementById('cloudStatus');
+            const statusText = document.getElementById('cloudStatusText');
+
+            if (!config.databaseURL) {
+                statusBox.className = "cloud-status-bar cloud-offline";
+                statusText.innerText = "السحابة غير مفعلة - اضبط إعدادات Firebase من قسم الإعدادات";
+                return;
+            }
+
+            try {
+                const firebaseConfig = {
+                    apiKey: config.apiKey || "dummy-key",
+                    databaseURL: config.databaseURL
+                };
+
+                firebaseApp = initializeApp(firebaseConfig);
+                firebaseDb = getDatabase(firebaseApp);
+
+                statusBox.className = "cloud-status-bar cloud-online";
+                statusText.innerText = "متصل بالسحابة Firebase (مزامنة فورية حية)";
+
+                // الاستماع للتغيرات السحابية ومزامنتها محلياً
+                const storeRef = ref(firebaseDb, 'alAmeenStoreData');
+                onValue(storeRef, (snapshot) => {
+                    const data = snapshot.val();
+                    if (data) {
+                        isSyncingFromCloud = true;
+                        if (data.stock) localStorage.setItem('alAmeenStock', JSON.stringify(data.stock));
+                        if (data.invoices) localStorage.setItem('alAmeenInvoices', JSON.stringify(data.invoices));
+                        if (data.expenses) localStorage.setItem('alAmeenExpenses', JSON.stringify(data.expenses));
+                        if (data.settings) localStorage.setItem('alAmeenSettings', JSON.stringify(data.settings));
+                        if (data.users) localStorage.setItem('alAmeenUsers', JSON.stringify(data.users));
+
+                        // إعادة تحديث الواجهات النشطة
+                        if (window.checkAlerts) window.checkAlerts();
+                        if (window.renderQuickItems) window.renderQuickItems();
+                        
+                        const activePage = document.querySelector('.page.active');
+                        if (activePage) {
+                            const pid = activePage.id;
+                            if (pid === 'stockPage' && window.renderStockTable) window.renderStockTable();
+                            if (pid === 'invoicesListPage' && window.renderInvoicesList) window.renderInvoicesList();
+                            if (pid === 'accountsPage' && window.renderAccounts) window.renderAccounts();
+                        }
+                        isSyncingFromCloud = false;
+                    }
+                });
+
+            } catch (err) {
+                console.error("خطأ في الاتصال بالسحابة:", err);
+                statusBox.className = "cloud-status-bar cloud-offline";
+                statusText.innerText = "فشل الاتصال بالسحابة - تحقق من الرابط والإعدادات";
+            }
+        }
+
+        // دالة رفع البيانات محلياً وإلى السحابة
+        window.syncToCloud = function() {
+            if (isSyncingFromCloud) return; // منع التكرار اللانهائي أثناء الاستلام
+            
+            if (firebaseDb) {
+                const fullBackup = {
+                    stock: JSON.parse(localStorage.getItem('alAmeenStock') || '[]'),
+                    invoices: JSON.parse(localStorage.getItem('alAmeenInvoices') || '[]'),
+                    expenses: JSON.parse(localStorage.getItem('alAmeenExpenses') || '[]'),
+                    settings: JSON.parse(localStorage.getItem('alAmeenSettings') || '{}'),
+                    users: JSON.parse(localStorage.getItem('alAmeenUsers') || '[]'),
+                    lastUpdated: new Date().toISOString()
+                };
+
+                set(ref(firebaseDb, 'alAmeenStoreData'), fullBackup).catch(err => {
+                    console.error("خطأ أثناء الرفع السحابي:", err);
+                });
+            }
+        };
+
+        window.saveFirebaseSettings = function() {
+            const databaseURL = document.getElementById('cfgFbDbUrl').value.trim();
+            const apiKey = document.getElementById('cfgFbApiKey').value.trim();
+
+            if (!databaseURL) return alert("يرجى إدخال Database URL على الأقل");
+
+            const config = { databaseURL, apiKey };
+            localStorage.setItem('alAmeenFirebaseConfig', JSON.stringify(config));
+            alert("تم حفظ إعدادات Firebase! جاري الاتصال بالسحابة...");
+            initFirebase();
+        };
+
+        window.loadFirebaseSettingsInputs = function() {
+            const config = getFirebaseConfig();
+            const urlInput = document.getElementById('cfgFbDbUrl');
+            const keyInput = document.getElementById('cfgFbApiKey');
+            if (urlInput) urlInput.value = config.databaseURL || '';
+            if (keyInput) keyInput.value = config.apiKey || '';
+        };
+
+        // تشغيل التهيئة عند تحميل الصفحة
+        window.addEventListener('DOMContentLoaded', () => {
+            initFirebase();
+        });
+    </script>
+
+    <!-- المنطق البرمجي للمنظومة -->
     <script>
         let currentMode = 'sales';
         let items = [];
@@ -702,7 +848,12 @@
         let activeInvoiceData = null;
 
         function getStock() { return JSON.parse(localStorage.getItem('alAmeenStock') || '[]'); }
-        function saveStock(stock) { localStorage.setItem('alAmeenStock', JSON.stringify(stock)); checkAlerts(); }
+        function saveStock(stock) { 
+            localStorage.setItem('alAmeenStock', JSON.stringify(stock)); 
+            checkAlerts(); 
+            if(window.syncToCloud) window.syncToCloud();
+        }
+        
         function getInvoices() { return JSON.parse(localStorage.getItem('alAmeenInvoices') || '[]'); }
         function getExpenses() { return JSON.parse(localStorage.getItem('alAmeenExpenses') || '[]'); }
         
@@ -746,6 +897,7 @@
                 found = { email, password, role };
                 users.push(found);
                 localStorage.setItem('alAmeenUsers', JSON.stringify(users));
+                if(window.syncToCloud) window.syncToCloud();
             }
 
             currentUser = found;
@@ -831,6 +983,7 @@
             document.getElementById('cfgStorePhone').value = settings.storePhone || '';
             document.getElementById('cfgStoreNotes').value = settings.storeNotes || '';
             document.getElementById('cfgUsdRate').value = settings.usdRate || 150000;
+            if (window.loadFirebaseSettingsInputs) window.loadFirebaseSettingsInputs();
             renderUsersList();
         }
 
@@ -845,7 +998,8 @@
             localStorage.setItem('alAmeenSettings', JSON.stringify(settings));
             document.getElementById('displayStoreName').innerText = settings.storeName || 'الأمين للحسابات';
             document.getElementById('displayUsdRate').innerText = settings.usdRate.toLocaleString() + ' د.ع';
-            alert("تم حفظ بيانات المحل وسعر الصرف بنجاح!");
+            if(window.syncToCloud) window.syncToCloud();
+            alert("تم حفظ بيانات المحل وسعر الصرف والمزامنة بنجاح!");
         }
 
         function exportDataBackup() {
@@ -876,7 +1030,8 @@
                     if (data.expenses) localStorage.setItem('alAmeenExpenses', JSON.stringify(data.expenses));
                     if (data.settings) localStorage.setItem('alAmeenSettings', JSON.stringify(data.settings));
                     if (data.users) localStorage.setItem('alAmeenUsers', JSON.stringify(data.users));
-                    alert("تم استيراد النسخة الاحتياطية بنجاح!");
+                    if(window.syncToCloud) window.syncToCloud();
+                    alert("تم استيراد النسخة الاحتياطية ومزامنتها سحابياً بنجاح!");
                     location.reload();
                 } catch(err) {
                     alert("ملف النسخة الاحتياطية غير صالحة!");
@@ -896,6 +1051,7 @@
 
             users.push({ email, password, role: 'cashier' });
             localStorage.setItem('alAmeenUsers', JSON.stringify(users));
+            if(window.syncToCloud) window.syncToCloud();
             alert("تمت إضافة حساب الكاشير بنجاح!");
             document.getElementById('newCashierEmail').value = '';
             document.getElementById('newCashierPassword').value = '';
@@ -921,6 +1077,7 @@
             let users = getUsers();
             users.splice(index, 1);
             localStorage.setItem('alAmeenUsers', JSON.stringify(users));
+            if(window.syncToCloud) window.syncToCloud();
             renderUsersList();
         }
 
@@ -1201,8 +1358,9 @@
             let invoices = getInvoices();
             invoices.push(invoiceData);
             localStorage.setItem('alAmeenInvoices', JSON.stringify(invoices));
+            if(window.syncToCloud) window.syncToCloud();
 
-            alert("تم حفظ الفاتورة وتحديث المخزن بنجاح!");
+            alert("تم حفظ الفاتورة وتحديث المخزن والمزامنة السحابية بنجاح!");
             items = [];
             renderTable();
             showHome();
@@ -1390,6 +1548,7 @@
                     if(inv.remainingAmount === 0) inv.isPaid = true;
                     
                     localStorage.setItem('alAmeenInvoices', JSON.stringify(invoices));
+                    if(window.syncToCloud) window.syncToCloud();
                     closeModal('invoiceDetailModal');
                     
                     showReceiptModal(inv, amount);
@@ -1455,9 +1614,10 @@
             let expenses = getExpenses();
             expenses.push({ name, amount, date: new Date().toISOString() });
             localStorage.setItem('alAmeenExpenses', JSON.stringify(expenses));
+            if(window.syncToCloud) window.syncToCloud();
             document.getElementById('expenseName').value = '';
             document.getElementById('expenseAmount').value = '';
-            alert("تمت إضافة المصروف بنجاح");
+            alert("تمت إضافة المصروف وتحديث السحابة بنجاح");
             renderAccounts();
         }
 
@@ -1738,4 +1898,3 @@
     </script>
 </body>
 </html>
-
